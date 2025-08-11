@@ -7,13 +7,15 @@
 
 import UIKit
 protocol AddViewControllerDelegate: AnyObject {
-    func didAddItem(_ text: String)
-    func didEditItem(at index: Int, with text: String)
+    func didAddItem(_ text: String, isSelect: Bool)
+    func didEditItem(at index: Int, with text: String, isSelect: Bool)
 }
 
 class AddViewController: UIViewController {
     let textField = UITextField()
     let button = UIButton()
+    let shareButton = UIButton()
+    var isShare: Bool = false
     
     weak var delegate: AddViewControllerDelegate?
     
@@ -41,6 +43,17 @@ class AddViewController: UIViewController {
         button.frame = CGRect(x: 0, y: 0, width: 150, height: 50)
         button.addTarget(self, action: #selector(tapButton), for: .touchUpInside)
         view.addSubview(button)
+        
+        var shareConfig = UIButton.Configuration.plain()
+        shareConfig.title = "Share"
+        shareConfig.baseBackgroundColor = .white
+        shareConfig.baseForegroundColor = .black
+        shareConfig.image = isShare ? UIImage(systemName: "square.fill") : UIImage(systemName: "square.dotted")
+        shareConfig.imagePlacement = .leading
+        shareButton.configuration = shareConfig
+        shareButton.frame = CGRect(x: 0, y: 0, width: 150, height: 25)
+        shareButton.addTarget(self, action: #selector(tapShareButton), for: .touchUpInside)
+        view.addSubview(shareButton)
     }
     
     override func viewDidLayoutSubviews() {
@@ -48,12 +61,15 @@ class AddViewController: UIViewController {
         textField.center = view.center
         button.center.x = textField.center.x
         button.frame.origin.y = textField.frame.maxY + 20
+        shareButton.center.x = textField.center.x
+        shareButton.frame.origin.y = button.frame.maxY + 20
     }
     
-    func configForEdit(title: String, index: Int) {
+    func configForEdit(title: String, index: Int, share: Bool) {
         textField.text = title
         editingIndex = index
         isEditingMode = true
+        isShare = share
         self.title = "編輯項目"
     }
     
@@ -70,12 +86,17 @@ class AddViewController: UIViewController {
         }
         
         if isEditingMode, let index = editingIndex {
-            delegate?.didEditItem(at: index, with: text)
+            delegate?.didEditItem(at: index, with: text, isSelect: isShare)
         } else {
-            delegate?.didAddItem(text)
+            delegate?.didAddItem(text, isSelect: isShare)
         }
         
         navigationController?.popViewController(animated: true)
+    }
+    
+    @objc func tapShareButton() {
+        isShare.toggle()
+        shareButton.configuration?.image = isShare ? UIImage(systemName: "square.fill") : UIImage(systemName: "square.dotted")
     }
 
     /*

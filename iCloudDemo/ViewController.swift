@@ -9,7 +9,7 @@ import UIKit
 
 class ViewController: UIViewController {
     let tableView = UITableView()
-    var dataList: [String] = []
+    var dataList: [Item] = []
     let cloudMgr = CloudeSyncMgr.shared
 
     override func viewDidLoad() {
@@ -45,7 +45,8 @@ extension ViewController: UITableViewDelegate, UITableViewDataSource {
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         let controller = AddViewController()
         controller.delegate = self
-        controller.configForEdit(title: dataList[indexPath.row], index: indexPath.row)
+        let item = dataList[indexPath.row]
+        controller.configForEdit(title: item.title, index: indexPath.row, share: item.isShare)
         navigationController?.pushViewController(controller, animated: true)
         
         tableView.deselectRow(at: indexPath, animated: true)
@@ -66,22 +67,23 @@ extension ViewController: UITableViewDelegate, UITableViewDataSource {
     
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         let cell = tableView.dequeueReusableCell(withIdentifier: "cell", for: indexPath)
-        cell.textLabel?.text = dataList[indexPath.row]
+        cell.textLabel?.text = dataList[indexPath.row].title
         return cell
     }
 }
 
 extension ViewController: AddViewControllerDelegate {
-    func didAddItem(_ text: String) {
-        dataList.append(text)
-        tableView.reloadData()
-    }
-    
-    func didEditItem(at index: Int, with text: String) {
+    func didEditItem(at index: Int, with text: String, isSelect: Bool) {
         if index < dataList.count {
-            dataList[index] = text
+            dataList[index] = Item(title: text, isShare: isSelect)
             tableView.reloadData()
         }
+    }
+    
+    func didAddItem(_ text: String, isSelect: Bool) {
+        let newItem = Item(title: text, isShare: isSelect)
+        dataList.append(newItem)
+        tableView.reloadData()
     }
 }
 
