@@ -7,6 +7,13 @@
 
 import Foundation
 struct Item {
-    let title: String
-    let isShare: Bool
+    var title: String
+    var isShare: Bool
+    let timestamp: Double
+
+    init(title: String = "", isShare: Bool = false, timestamp: Double = Date().timeIntervalSince1970) {
+        self.title = title
+        self.isShare = isShare
+        self.timestamp = timestamp
+    }
 }

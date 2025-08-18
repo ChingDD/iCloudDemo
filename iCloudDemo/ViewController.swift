@@ -56,7 +56,7 @@ extension ViewController: UITableViewDelegate, UITableViewDataSource {
         let controller = AddViewController()
         controller.delegate = self
         let item = dataList[indexPath.row]
-        controller.configForEdit(title: item.title, index: indexPath.row, share: item.isShare)
+        controller.configForEdit(item: item, index: indexPath.row)
         navigationController?.pushViewController(controller, animated: true)
         
         tableView.deselectRow(at: indexPath, animated: true)
@@ -83,17 +83,16 @@ extension ViewController: UITableViewDelegate, UITableViewDataSource {
 }
 
 extension ViewController: AddViewControllerDelegate {
-    func didEditItem(at index: Int, with text: String, isSelect: Bool) {
-        if index < dataList.count {
-            dataList[index] = Item(title: text, isShare: isSelect)
-            tableView.reloadData()
-        }
+    func didAddItem(item: Item) {
+        dataList.append(item)
+        tableView.reloadData()
     }
     
-    func didAddItem(_ text: String, isSelect: Bool) {
-        let newItem = Item(title: text, isShare: isSelect)
-        dataList.append(newItem)
-        tableView.reloadData()
+    func didEditItem(at index: Int, item: Item) {
+        if index < dataList.count {
+            dataList[index] = item
+            tableView.reloadData()
+        }
     }
 }
 

@@ -27,13 +27,14 @@ class CloudSyncMgr {
         }
     }
 
-    private func setRecord(name: String, isShare: Bool) -> CKRecord {
+    private func setRecord(name: String, isShare: Bool, timestamp: Double) -> CKRecord {
         // 指定哪個 Zone：let record = CKRecord(recordType: "Note", zoneID: CKRecordZone(zoneName: "NoteZone").zoneID)
         // Default Zone
         let record = CKRecord(recordType: "Note")
         record.setValuesForKeys([
             "name": name,
             "isShare": isShare,   // Stored as Int(64)
+            "timestamp": timestamp
         ])
         return record
     }
@@ -63,9 +64,10 @@ class CloudSyncMgr {
                         $0.creationDate! < $1.creationDate!
                     }
                     .compactMap {
-                    if let name = $0["name"] as? String, let isShareInt = $0["isShare"] as? Int {
-                        return Item(title: name,
-                                    isShare: isShareInt == 1 ? true : false)
+                        if let name = $0["name"] as? String,
+                           let isShareInt = $0["isShare"] as? Int,
+                           let timestamp = $0["timestamp"] as? Double {
+                        return Item(title: name, isShare: isShareInt == 1 ? true : false, timestamp: timestamp)
                     } else {
                         return nil
                     }
@@ -80,16 +82,52 @@ class CloudSyncMgr {
         }
     }
 
-    func saveToCloud(name: String?, isShare: Bool) {
-        guard let name, !name.isEmpty else { return }
+    func saveToCloud(item: Item) {
+        guard !item.title.isEmpty else { return }
 
-        let record = setRecord(name: name, isShare: isShare)
+        let record = setRecord(name: item.title, isShare: item.isShare, timestamp: item.timestamp)
         database.save(record) { record, error in
             guard record != nil, error == nil else {
                 print("error:\(String(describing: error))")
                 return
             }
             print("Save Success")
+        }
+    }
+
+    func updateToCloud(item: Item) {
+        let query = CKQuery(recordType: "Note", 
+                           predicate: NSPredicate(format: "timestamp == %f", item.timestamp))
+        
+        database.fetch(withQuery: query) { [weak self] result in
+            switch result {
+            case .success(let records):
+                let results = records.matchResults
+                
+                if let firstRecord = results.first {
+                    switch firstRecord.1 {
+                    case .success(let existingRecord):
+                        existingRecord["name"] = item.title
+                        existingRecord["isShare"] = item.isShare
+                        
+                        self?.database.save(existingRecord) { record, error in
+                            guard record != nil, error == nil else {
+                                print("Update error: \(String(describing: error))")
+                                return
+                            }
+                            print("Update Success")
+                        }
+                        
+                    case .failure(let error):
+                        print("Fetch record error: \(error)")
+                    }
+                } else {
+                    print("No record found with timestamp: \(item.timestamp)")
+                }
+                
+            case .failure(let error):
+                print("Query error: \(error)")
+            }
         }
     }
 
