@@ -32,6 +32,7 @@ class AddViewController: UIViewController {
         textField.textColor = .black
         textField.layer.borderColor = UIColor.black.cgColor
         textField.layer.borderWidth = 3
+        textField.delegate = self
         view.addSubview(textField)
 
         var config = UIButton.Configuration.filled()
@@ -90,7 +91,9 @@ class AddViewController: UIViewController {
         } else {
             delegate?.didAddItem(text, isSelect: isShare)
         }
-        
+
+        CloudSyncMgr.shared.saveToCloud(name: text, isShare: isShare)
+
         navigationController?.popViewController(animated: true)
     }
     
@@ -109,4 +112,11 @@ class AddViewController: UIViewController {
     }
     */
 
+}
+
+extension AddViewController: UITextFieldDelegate {
+    func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+        textField.resignFirstResponder()
+        return true
+    }
 }

@@ -10,11 +10,22 @@ import UIKit
 class ViewController: UIViewController {
     let tableView = UITableView()
     var dataList: [Item] = []
-    let cloudMgr = CloudeSyncMgr.shared
+    let cloudMgr = CloudSyncMgr.shared
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        // Do any additional setup after loading the view.
+        // Do any additional setup after loading the view.// fetch data
+        CloudSyncMgr.shared.fetchRecords { [weak self] items in
+            guard let items else {
+                print("cloud item is nil")
+                return
+            }
+            DispatchQueue.main.async {
+                self?.dataList = items
+                self?.tableView.reloadData()
+            }
+        }
+        
         view.backgroundColor = .red
         view.addSubview(tableView)
         
@@ -24,7 +35,6 @@ class ViewController: UIViewController {
         tableView.dataSource = self
         tableView.delegate = self
         tableView.register(UITableViewCell.self, forCellReuseIdentifier: "cell")
-        tableView.reloadData()
     }
     
     override func viewDidLayoutSubviews() {
