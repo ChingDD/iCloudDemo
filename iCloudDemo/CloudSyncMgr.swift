@@ -138,10 +138,33 @@ class CloudSyncMgr {
         }
     }
     
-    func deleteToCloud(readyToDelete: [CKRecord]) {
-        operation.recordIDsToDelete = readyToDelete.map({ $0.recordID })
-        backGroundQueue.async {
-            self.operation.start()
+    func deleteToCloud(readyToDelete: Item) {
+        let query = CKQuery(recordType: "Note",
+                           predicate: NSPredicate(format: "timestamp == %f", readyToDelete.timestamp))
+        database.fetch(withQuery: query) { [weak self] result in
+            switch result {
+            case .success(let records):
+                let results = records.matchResults
+
+                if let firstRecord = results.first {
+                    switch firstRecord.1 {
+                    case .success(let existingRecord):
+                        self?.operation.recordIDsToDelete = [existingRecord.recordID]
+                        self?.backGroundQueue.async {
+                            self?.operation.start()
+                            print("Delete record successfully")
+                        }
+
+                    case .failure(let error):
+                        print("Fetch record error: \(error)")
+                    }
+                } else {
+                    print("No record found with timestamp: \(readyToDelete.timestamp)")
+                }
+
+            case .failure(let error):
+                print("Query error: \(error)")
+            }
         }
     }
     

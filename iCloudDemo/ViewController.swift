@@ -64,7 +64,9 @@ extension ViewController: UITableViewDelegate, UITableViewDataSource {
     
     func tableView(_ tableView: UITableView, trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
         let deleteButton = UIContextualAction(style: .destructive, title: "Delete") { [weak self] (action, view, completionHandler) in
-            self?.dataList.remove(at: indexPath.row)
+            guard let self else { return }
+            CloudSyncMgr.shared.deleteToCloud(readyToDelete: self.dataList[indexPath.row])
+            self.dataList.remove(at: indexPath.row)
             tableView.reloadData()
         }
         let config = UISwipeActionsConfiguration(actions: [deleteButton])
