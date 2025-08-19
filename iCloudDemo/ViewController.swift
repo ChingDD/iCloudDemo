@@ -6,6 +6,7 @@
 //
 
 import UIKit
+import CloudKit
 
 class ViewController: UIViewController {
     let tableView = UITableView()
@@ -31,7 +32,8 @@ class ViewController: UIViewController {
         
         title = "iCloud Demo"
         navigationItem.rightBarButtonItem = UIBarButtonItem(barButtonSystemItem: .add, target: self, action: #selector(add))
-        
+        navigationItem.leftBarButtonItem = UIBarButtonItem(barButtonSystemItem: .action, target: self, action: #selector(share))
+
         tableView.dataSource = self
         tableView.delegate = self
         tableView.register(UITableViewCell.self, forCellReuseIdentifier: "cell")
@@ -47,6 +49,12 @@ class ViewController: UIViewController {
         controller.delegate = self
         controller.configForAdd()
         navigationController?.pushViewController(controller, animated: true)
+    }
+
+    @objc func share() {
+        let controller = UICloudSharingController(share: CloudSyncMgr.shared.shareRecord!, container: CloudSyncMgr.shared.container)
+        controller.delegate = self
+        present(controller, animated: true)
     }
 }
 
@@ -98,3 +106,13 @@ extension ViewController: AddViewControllerDelegate {
     }
 }
 
+
+extension ViewController: UICloudSharingControllerDelegate {
+    func cloudSharingController(_ csc: UICloudSharingController, failedToSaveShareWithError error: any Error) {
+        print("share error: \(error)")
+    }
+    
+    func itemTitle(for csc: UICloudSharingController) -> String? {
+        return nil
+    }
+}
