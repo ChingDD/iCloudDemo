@@ -11,13 +11,19 @@ import CloudKit
 class CloudSyncMgr {
     static let shared = CloudSyncMgr()
     private let defaultContainer = CKContainer.default()
+    private(set) var container = CKContainer(identifier: "iCloud.com.jeff.iCloudDemo")
     private let database = CKContainer(identifier: "iCloud.com.jeff.iCloudDemo").privateCloudDatabase
     private let sharedZone = CKShare(recordZoneID: CKRecordZone(zoneName: "NoteZone").zoneID)
     private let defaultZone = CKRecordZone.default()
     private let operation = CKModifyRecordsOperation()
+    private(set) var shareRecord: CKShare?
+    private var rootShareRecord: CKRecord?
     private let backGroundQueue = DispatchQueue(label: "com.Note.backgroundQueue")
 
-    init() {}
+    init() {
+        handleCompletion()
+        configShare()
+    }
 
     private func handleCompletion() {
         operation.completionBlock = {
@@ -37,6 +43,45 @@ class CloudSyncMgr {
             "timestamp": timestamp
         ])
         return record
+    }
+
+    private func configShare() {
+        let query = CKQuery(recordType: "Note",
+                            predicate: NSPredicate(format: "name == %@", "share"))
+        database.fetch(withQuery: query) { [weak self] result in
+            switch result {
+            case .success(let records):
+                let results = records.matchResults
+
+                if let firstRecord = results.first {
+                    switch firstRecord.1 {
+                    case .success(let rootShareRecord):
+                        print("share record exist")
+
+                    case .failure(let error):
+                        print("Fetch share record error: \(error)")
+                    }
+                } else {
+                    let rootShareRecord = CKRecord(recordType: "Note")
+                    rootShareRecord.setValuesForKeys([
+                        "name": "share",
+                        "isShare": false,   // Stored as Int(64)
+                        "timestamp": Date().timeIntervalSince1970
+                    ])
+                    let share = CKShare(rootRecord: rootShareRecord)
+                    rootShareRecord.setParent(share)
+                    self?.database.modifyRecords(saving: [rootShareRecord,share], deleting: [], completionHandler: { result in
+                        print("configShare | set Share Status Success")
+                    })
+
+                    self?.rootShareRecord = rootShareRecord
+                    self?.shareRecord = share
+                }
+
+            case .failure(let error):
+                print("Query error: \(error)")
+            }
+        }
     }
 
     func fetchRecords(completion: @escaping ([Item]?) -> Void) {
@@ -86,6 +131,9 @@ class CloudSyncMgr {
         guard !item.title.isEmpty else { return }
 
         let record = setRecord(name: item.title, isShare: item.isShare, timestamp: item.timestamp)
+        if item.isShare {
+            record.setParent(self.rootShareRecord)
+        }
         database.save(record) { record, error in
             guard record != nil, error == nil else {
                 print("error:\(String(describing: error))")
@@ -167,5 +215,36 @@ class CloudSyncMgr {
             }
         }
     }
-    
+
+    func setShareStatus(item: Item) {
+        let isShare = item.isShare
+        let record = setRecord(name: item.title, isShare: item.isShare, timestamp: item.timestamp)
+        let query = CKQuery(recordType: "Note",
+                            predicate: NSPredicate(format: "name == %@", "share"))
+        database.fetch(withQuery: query) { [weak self] result in
+            switch result {
+            case .success(let records):
+                let results = records.matchResults
+
+                if let firstRecord = results.first {
+                    switch firstRecord.1 {
+                    case .success(let rootShareRecord):
+                        guard isShare else { return }
+                        record.setParent(rootShareRecord)
+                        self?.database.modifyRecords(saving: [rootShareRecord,self!.shareRecord!], deleting: [], completionHandler: { result in
+                            print("setShareStatus Success")
+                        })
+
+                    case .failure(let error):
+                        print("Fetch share record error: \(error)")
+                    }
+                } else {
+                    print("No share record found")
+                }
+
+            case .failure(let error):
+                print("Query error: \(error)")
+            }
+        }
+    }
 }
