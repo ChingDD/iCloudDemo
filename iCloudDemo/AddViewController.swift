@@ -88,13 +88,19 @@ class AddViewController: UIViewController {
             currentItem.title = text
             delegate?.didEditItem(at: index, item: currentItem)
             CloudSyncMgr.shared.updateToCloud(item: currentItem)
+            navigationController?.popViewController(animated: true)
         } else {
             currentItem.title = text
-            delegate?.didAddItem(item: currentItem)
-            CloudSyncMgr.shared.saveToCloud(item: currentItem)
+            CloudSyncMgr.shared.saveToCloud(item: currentItem) { [weak self] recordID in
+                guard let self else { return }
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    currentItem.recordID = recordID
+                    delegate?.didAddItem(item: currentItem)
+                    navigationController?.popViewController(animated: true)
+                }
+            }
         }
-
-        navigationController?.popViewController(animated: true)
     }
     
     @objc func tapShareButton() {

@@ -12,31 +12,51 @@ class CloudSyncMgr {
     static let shared = CloudSyncMgr()
     private let defaultContainer = CKContainer.default()
     private(set) var container = CKContainer(identifier: "iCloud.com.jeff.iCloudDemo")
-    private let database = CKContainer(identifier: "iCloud.com.jeff.iCloudDemo").privateCloudDatabase
+    private let privateDatabase = CKContainer(identifier: "iCloud.com.jeff.iCloudDemo").privateCloudDatabase
+    private let sharedDatabase = CKContainer(identifier: "iCloud.com.jeff.iCloudDemo").sharedCloudDatabase
     private let sharedZone = CKShare(recordZoneID: CKRecordZone(zoneName: "NoteZone").zoneID)
     private let defaultZone = CKRecordZone.default()
-    private let operation = CKModifyRecordsOperation()
     private(set) var shareRecord: CKShare?
-    private var rootShareRecord: CKRecord?
+    private(set) var rootShareRecord: CKRecord?
     private let backGroundQueue = DispatchQueue(label: "com.Note.backgroundQueue")
 
     init() {
-        handleCompletion()
+        createCustomZoneIfNeeded()
         configShare()
     }
-
-    private func handleCompletion() {
-        operation.completionBlock = {
-            DispatchQueue.main.async {
-                print("Cloud sync finished: \(self.operation.isFinished)")
+    
+    private func createCustomZoneIfNeeded() {
+        let customZone = CKRecordZone(zoneName: "NoteZone")
+        
+        privateDatabase.fetchAllRecordZones { [weak self] zones, error in
+            if let zones = zones {
+                let zoneNames = zones.map { $0.zoneID.zoneName }
+                print("Existing zones: \(zoneNames)")
+                
+                if !zoneNames.contains("NoteZone") {
+                    print("Creating custom zone: NoteZone")
+                    self?.privateDatabase.save(customZone) { zone, error in
+                        if let error = error {
+                            print("Failed to create custom zone: \(error)")
+                        } else {
+                            print("Custom zone created successfully")
+                        }
+                    }
+                } else {
+                    print("Custom zone NoteZone already exists")
+                }
+            } else if let error = error {
+                print("Failed to fetch zones: \(error)")
             }
         }
     }
 
     private func setRecord(name: String, isShare: Bool, timestamp: Double) -> CKRecord {
-        // 指定哪個 Zone：let record = CKRecord(recordType: "Note", zoneID: CKRecordZone(zoneName: "NoteZone").zoneID)
+        // 指定哪個 Zone：
+        let zoneID = CKRecordZone(zoneName: "NoteZone").zoneID
+        let record = CKRecord(recordType: "Note", recordID: CKRecord.ID(zoneID: zoneID))
         // Default Zone
-        let record = CKRecord(recordType: "Note")
+//        let record = CKRecord(recordType: "Note")
         record.setValuesForKeys([
             "name": name,
             "isShare": isShare,   // Stored as Int(64)
@@ -48,7 +68,8 @@ class CloudSyncMgr {
     private func configShare() {
         let query = CKQuery(recordType: "Note",
                             predicate: NSPredicate(format: "name == %@", "share"))
-        database.fetch(withQuery: query) { [weak self] result in
+        let zoneID = CKRecordZone(zoneName: "NoteZone").zoneID
+        privateDatabase.fetch(withQuery: query, inZoneWith: zoneID) { [weak self] result in
             switch result {
             case .success(let records):
                 let results = records.matchResults
@@ -56,21 +77,23 @@ class CloudSyncMgr {
                 if let firstRecord = results.first {
                     switch firstRecord.1 {
                     case .success(let rootShareRecord):
+                        let share = CKShare(rootRecord: rootShareRecord)
+                        self?.rootShareRecord = rootShareRecord
+                        self?.shareRecord = share
                         print("share record exist")
 
                     case .failure(let error):
                         print("Fetch share record error: \(error)")
                     }
                 } else {
-                    let rootShareRecord = CKRecord(recordType: "Note")
+                    let rootShareRecord = CKRecord(recordType: "Note", recordID: CKRecord.ID(zoneID: zoneID))
                     rootShareRecord.setValuesForKeys([
                         "name": "share",
                         "isShare": false,   // Stored as Int(64)
                         "timestamp": Date().timeIntervalSince1970
                     ])
                     let share = CKShare(rootRecord: rootShareRecord)
-                    rootShareRecord.setParent(share)
-                    self?.database.modifyRecords(saving: [rootShareRecord,share], deleting: [], completionHandler: { result in
+                    self?.privateDatabase.modifyRecords(saving: [rootShareRecord,share], deleting: [], completionHandler: { result in
                         print("configShare | set Share Status Success")
                     })
 
@@ -89,7 +112,9 @@ class CloudSyncMgr {
 
         let query = CKQuery(recordType: "Note",
                             predicate: NSPredicate(value: true))
-        database.fetch(withQuery: query) { result in
+        let zoneID = CKRecordZone(zoneName: "NoteZone").zoneID
+        print("fetchRecords - Searching in zone: \(zoneID)")
+        privateDatabase.fetch(withQuery: query, inZoneWith: zoneID) { result in
             switch result {
             case .success(let records):
                 let results = records.matchResults
@@ -112,7 +137,8 @@ class CloudSyncMgr {
                         if let name = $0["name"] as? String,
                            let isShareInt = $0["isShare"] as? Int,
                            let timestamp = $0["timestamp"] as? Double {
-                        return Item(title: name, isShare: isShareInt == 1 ? true : false, timestamp: timestamp)
+                        print("fetchRecords - Found record '\(name)' with timestamp: \(timestamp) in zone: \($0.recordID.zoneID.zoneName)")
+                        return Item(title: name, isShare: isShareInt == 1 ? true : false, timestamp: timestamp, recordID: $0.recordID)
                     } else {
                         return nil
                     }
@@ -127,91 +153,91 @@ class CloudSyncMgr {
         }
     }
 
-    func saveToCloud(item: Item) {
-        guard !item.title.isEmpty else { return }
+    func saveToCloud(item: Item, completion: @escaping (CKRecord.ID?) -> Void = { _ in }) {
+        guard !item.title.isEmpty else { 
+            completion(nil)
+            return 
+        }
 
         let record = setRecord(name: item.title, isShare: item.isShare, timestamp: item.timestamp)
         if item.isShare {
             record.setParent(self.rootShareRecord)
         }
-        database.save(record) { record, error in
-            guard record != nil, error == nil else {
+        privateDatabase.save(record) { savedRecord, error in
+            guard let savedRecord = savedRecord, error == nil else {
                 print("error:\(String(describing: error))")
+                completion(nil)
                 return
             }
             print("Save Success")
+            completion(savedRecord.recordID)
         }
     }
 
     func updateToCloud(item: Item) {
-        let query = CKQuery(recordType: "Note", 
-                           predicate: NSPredicate(format: "timestamp == %f", item.timestamp))
+        guard let recordID = item.recordID else {
+            print("updateToCloud - No recordID available, cannot update")
+            return
+        }
         
-        database.fetch(withQuery: query) { [weak self] result in
-            switch result {
-            case .success(let records):
-                let results = records.matchResults
-                
-                if let firstRecord = results.first {
-                    switch firstRecord.1 {
-                    case .success(let existingRecord):
-                        existingRecord["name"] = item.title
-                        existingRecord["isShare"] = item.isShare
-                        
-                        self?.database.save(existingRecord) { record, error in
-                            guard record != nil, error == nil else {
-                                print("Update error: \(String(describing: error))")
-                                return
-                            }
-                            print("Update Success")
-                        }
-                        
-                    case .failure(let error):
-                        print("Fetch record error: \(error)")
-                    }
+        print("updateToCloud - Looking for recordID: \(recordID)")
+        
+        privateDatabase.fetch(withRecordID: recordID) { [weak self] record, error in
+            if let record = record {
+                print("updateToCloud - Found record with recordID")
+                record["name"] = item.title
+                record["isShare"] = item.isShare
+                if item.isShare {
+                    record.setParent(self?.rootShareRecord)
                 } else {
-                    print("No record found with timestamp: \(item.timestamp)")
+                    record.parent = nil
                 }
-                
-            case .failure(let error):
-                print("Query error: \(error)")
+
+                self?.privateDatabase.save(record) { savedRecord, error in
+                    guard savedRecord != nil, error == nil else {
+                        print("Update error: \(String(describing: error))")
+                        return
+                    }
+                    print("Update Success")
+                }
+            } else if let error = error {
+                print("updateToCloud - Fetch error: \(error)")
+            } else {
+                print("updateToCloud - Record not found")
             }
         }
     }
 
     func saveToCloud(readyToSave: [CKRecord]) {
+        let operation = CKModifyRecordsOperation()
         operation.recordsToSave = readyToSave
         backGroundQueue.async {
-            self.operation.start()
+            self.privateDatabase.add(operation)
+        }
+
+        operation.completionBlock = {
+            DispatchQueue.main.async {
+                print("Save to Cloud Finished: \(operation.isFinished)")
+            }
         }
     }
     
     func deleteToCloud(readyToDelete: Item) {
-        let query = CKQuery(recordType: "Note",
-                           predicate: NSPredicate(format: "timestamp == %f", readyToDelete.timestamp))
-        database.fetch(withQuery: query) { [weak self] result in
-            switch result {
-            case .success(let records):
-                let results = records.matchResults
+        guard let recordID = readyToDelete.recordID else {
+            print("deleteToCloud - No recordID available, cannot delete")
+            return
+        }
+        
+        print("deleteToCloud - Deleting recordID: \(recordID), name: \(readyToDelete.title)")
+        let operation = CKModifyRecordsOperation()
+        operation.recordIDsToDelete = [recordID]
+        self.backGroundQueue.async {
+            self.privateDatabase.add(operation)
+        }
 
-                if let firstRecord = results.first {
-                    switch firstRecord.1 {
-                    case .success(let existingRecord):
-                        self?.operation.recordIDsToDelete = [existingRecord.recordID]
-                        self?.backGroundQueue.async {
-                            self?.operation.start()
-                            print("Delete record successfully")
-                        }
-
-                    case .failure(let error):
-                        print("Fetch record error: \(error)")
-                    }
-                } else {
-                    print("No record found with timestamp: \(readyToDelete.timestamp)")
-                }
-
-            case .failure(let error):
-                print("Query error: \(error)")
+        operation.completionBlock = {
+            DispatchQueue.main.async {
+                print("Delete to Cloud Finished: \(operation.isFinished)")
             }
         }
     }
@@ -221,7 +247,8 @@ class CloudSyncMgr {
         let record = setRecord(name: item.title, isShare: item.isShare, timestamp: item.timestamp)
         let query = CKQuery(recordType: "Note",
                             predicate: NSPredicate(format: "name == %@", "share"))
-        database.fetch(withQuery: query) { [weak self] result in
+        let zoneID = CKRecordZone(zoneName: "NoteZone").zoneID
+        privateDatabase.fetch(withQuery: query, inZoneWith: zoneID) { [weak self] result in
             switch result {
             case .success(let records):
                 let results = records.matchResults
@@ -231,7 +258,7 @@ class CloudSyncMgr {
                     case .success(let rootShareRecord):
                         guard isShare else { return }
                         record.setParent(rootShareRecord)
-                        self?.database.modifyRecords(saving: [rootShareRecord,self!.shareRecord!], deleting: [], completionHandler: { result in
+                        self?.privateDatabase.modifyRecords(saving: [rootShareRecord,self!.shareRecord!], deleting: [], completionHandler: { result in
                             print("setShareStatus Success")
                         })
 
