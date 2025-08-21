@@ -14,7 +14,7 @@ class CloudSyncMgr {
     private(set) var container = CKContainer(identifier: "iCloud.com.jeff.iCloudDemo")
     private let privateDatabase = CKContainer(identifier: "iCloud.com.jeff.iCloudDemo").privateCloudDatabase
     private let sharedDatabase = CKContainer(identifier: "iCloud.com.jeff.iCloudDemo").sharedCloudDatabase
-    private let sharedZone = CKShare(recordZoneID: CKRecordZone(zoneName: "NoteZone").zoneID)
+    private let customZone = CKRecordZone(zoneName: "NoteZone")
     private let defaultZone = CKRecordZone.default()
     private(set) var shareRecord: CKShare?
     private(set) var rootShareRecord: CKRecord?
@@ -51,10 +51,10 @@ class CloudSyncMgr {
         }
     }
 
-    private func setRecord(name: String, isShare: Bool, timestamp: Double) -> CKRecord {
+    private func addRecord(name: String, isShare: Bool, timestamp: Double, completion: @escaping (CKRecord?) -> Void) {
         // 指定哪個 Zone：
-        let zoneID = CKRecordZone(zoneName: "NoteZone").zoneID
-        let record = CKRecord(recordType: "Note", recordID: CKRecord.ID(zoneID: zoneID))
+        let recordID = CKRecord.ID(zoneID: customZone.zoneID)
+        let record = CKRecord(recordType: "Note", recordID: recordID)
         // Default Zone
 //        let record = CKRecord(recordType: "Note")
         record.setValuesForKeys([
@@ -62,7 +62,14 @@ class CloudSyncMgr {
             "isShare": isShare,   // Stored as Int(64)
             "timestamp": timestamp
         ])
-        return record
+        privateDatabase.save(record) { savedRecord, error in
+            guard error == nil else {
+                print("Add Record Fail - \(error)")
+                completion(nil)
+                return
+            }
+            completion(savedRecord)
+        }
     }
 
     private func configShare() {
@@ -159,7 +166,15 @@ class CloudSyncMgr {
             return 
         }
 
-        let record = setRecord(name: item.title, isShare: item.isShare, timestamp: item.timestamp)
+        let record = addRecord(name: item.title, isShare: item.isShare, timestamp: item.timestamp) {
+            [weak self] savedRecord in
+            guard let savedRecord else {
+                print("savedRecord is nil")
+                return
+            }
+
+        }
+
         if item.isShare {
             record.setParent(self.rootShareRecord)
         }
@@ -244,7 +259,7 @@ class CloudSyncMgr {
 
     func setShareStatus(item: Item) {
         let isShare = item.isShare
-        let record = setRecord(name: item.title, isShare: item.isShare, timestamp: item.timestamp)
+        let record = addRecord(name: item.title, isShare: item.isShare, timestamp: item.timestamp)
         let query = CKQuery(recordType: "Note",
                             predicate: NSPredicate(format: "name == %@", "share"))
         let zoneID = CKRecordZone(zoneName: "NoteZone").zoneID
