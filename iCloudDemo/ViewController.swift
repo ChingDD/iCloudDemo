@@ -16,17 +16,22 @@ class ViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         // Do any additional setup after loading the view.// fetch data
-        CloudSyncMgr.shared.fetchRecords { [weak self] items in
-            guard let items else {
-                print("cloud item is nil")
-                return
-            }
-            DispatchQueue.main.async {
-                self?.dataList = items
-                self?.tableView.reloadData()
+        CloudSyncMgr.shared.fetchRecords(database: .private) { [weak self] items in
+            CloudSyncMgr.shared.fetchRecords(database: .shared) { [weak self] sharedItems in
+                DispatchQueue.main.async {
+                    if let items {
+                        self?.dataList.append(contentsOf: items)
+                    }
+
+                    if let sharedItems {
+                        self?.dataList.append(contentsOf: sharedItems)
+                    }
+
+                    self?.tableView.reloadData()
+                }
             }
         }
-        
+
         view.backgroundColor = .red
         view.addSubview(tableView)
         
@@ -52,9 +57,37 @@ class ViewController: UIViewController {
     }
 
     @objc func share() {
-        let controller = UICloudSharingController(share: CloudSyncMgr.shared.shareRecord!, container: CloudSyncMgr.shared.container)
-        controller.delegate = self
-        present(controller, animated: true)
+        guard let rootRecord = CloudSyncMgr.shared.rootShareRecord else {
+            print("Share Fail: Root Record Not Found")
+            return
+        }
+
+        // 建立 CKShare，讓 CloudKit 自動分配 share URL
+        let share = CKShare(rootRecord: rootRecord)
+        share[CKShare.SystemFieldKey.title] = "我的共享資料" as CKRecordValue
+
+        // 儲存 share 和 rootRecord
+        let op = CKModifyRecordsOperation(recordsToSave: [rootRㄍecord, share], recordIDsToDelete: nil)
+        op.savePolicy = .changedKeys
+        op.modifyRecordsCompletionBlock = { records, recordIDs, error in
+            DispatchQueue.main.async {
+                guard error == nil else {
+                    print("Share Fail: \(String(describing: error))")
+                    return
+                }
+
+                // CloudKit 成功儲存 share 後會自動分配 stable share URL
+                // 使用 UICloudSharingController 來管理參與者和權限，並分發 share URL
+                let controller = UICloudSharingController(share: share, container: CloudSyncMgr.shared.container)
+                controller.availablePermissions = [.allowReadWrite, .allowPrivate]
+                controller.delegate = self
+
+                self.present(controller, animated: true)
+                print("Share created successfully with stable URL")
+            }
+        }
+
+        CloudSyncMgr.shared.container.privateCloudDatabase.add(op)
     }
 }
 

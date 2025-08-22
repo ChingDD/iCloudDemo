@@ -6,6 +6,7 @@
 //
 
 import UIKit
+import CloudKit
 
 @main
 class AppDelegate: UIResponder, UIApplicationDelegate {
@@ -32,6 +33,40 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         // Use this method to release any resources that were specific to the discarded scenes, as they will not return.
     }
 
+//    func application(_ application: UIApplication, userDidAcceptCloudKitShareWith shareMetadata: CKShare.Metadata ) {
+//        let container = CKContainer(identifier: shareMetadata.containerIdentifier)
+//
+//        Task {
+//            do {
+//                try await container.accept(shareMetadata)
+//            } catch {
+//                // Handle errors that may occur
+//            }
+//        }
+//    }
+
+    func application(_ application: UIApplication, userDidAcceptCloudKitShareWith cloudKitShareMetadata: CKShare.Metadata) {
+
+        let acceptShareOperation: CKAcceptSharesOperation =
+            CKAcceptSharesOperation(shareMetadatas:
+            [cloudKitShareMetadata])
+
+        acceptShareOperation.qualityOfService = .userInteractive
+        acceptShareOperation.perShareCompletionBlock = {meta, share,
+            error in
+            print("share was accepted")
+        }
+        acceptShareOperation.acceptSharesCompletionBlock = {
+            error in
+            /// Send your user to where they need to go in your app
+        }
+        CKContainer(identifier: cloudKitShareMetadata.containerIdentifier).add(acceptShareOperation)
+    }
+
+    func confirmShareParticipation(from url: URL, container: CKContainer) async throws {
+        let shareMetadata = try await container.shareMetadata(for: url)
+        try await container.accept(shareMetadata)
+    }
 
 }
 
