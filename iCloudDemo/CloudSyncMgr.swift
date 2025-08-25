@@ -17,6 +17,7 @@ class CloudSyncMgr {
     private(set) var customZone = CKRecordZone(zoneName: "NoteZone")
     private let defaultZone = CKRecordZone.default()
     private(set) var rootShareRecord: CKRecord?
+    private(set) var share: CKShare?
     private let backGroundQueue = DispatchQueue(label: "com.Note.backgroundQueue")
 
     init() {
@@ -142,6 +143,23 @@ class CloudSyncMgr {
             case .failure(let error):
                 completion(.failure(error))
             }
+        }
+    }
+
+    func fetch(id: CKRecord.ID, completion: @escaping (Result<CKRecord,Error>) -> Void) {
+        let query = CKQuery(recordType: "Note",
+                            predicate: NSPredicate(format: "name == %@", "share"))
+        let zoneID = customZone.zoneID
+        privateDatabase.fetch(withRecordID: id) { (record, error) in
+            guard error == nil else {
+                completion(.failure(error!))
+                return
+            }
+            guard let record else {
+                completion(.failure(NSError(domain: "Record is nil", code: 0)))
+                return
+            }
+            completion(.success(record))
         }
     }
 

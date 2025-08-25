@@ -46,7 +46,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 //    }
 
     func application(_ application: UIApplication, userDidAcceptCloudKitShareWith cloudKitShareMetadata: CKShare.Metadata) {
-
+        print("share was accepted")
         let acceptShareOperation: CKAcceptSharesOperation =
             CKAcceptSharesOperation(shareMetadatas:
             [cloudKitShareMetadata])
@@ -54,7 +54,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         acceptShareOperation.qualityOfService = .userInteractive
         acceptShareOperation.perShareCompletionBlock = {meta, share,
             error in
-            print("share was accepted")
+            print("share was Completion")
         }
         acceptShareOperation.acceptSharesCompletionBlock = {
             error in

@@ -62,32 +62,42 @@ class ViewController: UIViewController {
             return
         }
 
-        // 建立 CKShare，讓 CloudKit 自動分配 share URL
-        let share = CKShare(rootRecord: rootRecord)
-        share[CKShare.SystemFieldKey.title] = "我的共享資料" as CKRecordValue
+        if let shareReference = rootRecord.share {
+            CloudSyncMgr.shared.fetch(id: shareReference.recordID) { result in
+                switch result {
+                case .success(let record):
+                    if let share = record as? CKShare {
+                        let op = CKModifyRecordsOperation(recordsToSave: [rootRecord, share], recordIDsToDelete: nil)
+                        op.savePolicy = .changedKeys
+                        op.modifyRecordsCompletionBlock = { records, recordIDs, error in
+                            DispatchQueue.main.async {
+                                guard error == nil else {
+                                    print("Share Fail: \(String(describing: error))")
+                                    return
+                                }
 
-        // 儲存 share 和 rootRecord
-        let op = CKModifyRecordsOperation(recordsToSave: [rootRㄍecord, share], recordIDsToDelete: nil)
-        op.savePolicy = .changedKeys
-        op.modifyRecordsCompletionBlock = { records, recordIDs, error in
-            DispatchQueue.main.async {
-                guard error == nil else {
-                    print("Share Fail: \(String(describing: error))")
-                    return
+                                // CloudKit 成功儲存 share 後會自動分配 stable share URL
+                                // 使用 UICloudSharingController 來管理參與者和權限，並分發 share URL
+                                let controller = UICloudSharingController(share: share, container: CloudSyncMgr.shared.container)
+                                controller.availablePermissions = [.allowReadWrite, .allowPrivate]
+                                controller.delegate = self
+
+                                self.present(controller, animated: true)
+                                print("Share created successfully with stable URL")
+                            }
+                        }
+
+                        CloudSyncMgr.shared.container.privateCloudDatabase.add(op)
+
+                    } else {
+                        print("Convert CKRecord to CKShare Fail")
+                    }
+
+                case .failure(let error):
+                    print("Share Fail: \(error)")
                 }
-
-                // CloudKit 成功儲存 share 後會自動分配 stable share URL
-                // 使用 UICloudSharingController 來管理參與者和權限，並分發 share URL
-                let controller = UICloudSharingController(share: share, container: CloudSyncMgr.shared.container)
-                controller.availablePermissions = [.allowReadWrite, .allowPrivate]
-                controller.delegate = self
-
-                self.present(controller, animated: true)
-                print("Share created successfully with stable URL")
             }
         }
-
-        CloudSyncMgr.shared.container.privateCloudDatabase.add(op)
     }
 }
 
