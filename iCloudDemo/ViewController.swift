@@ -15,18 +15,13 @@ class ViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        // Do any additional setup after loading the view.// fetch data
-        CloudSyncMgr.shared.fetchRecords { [weak self] items in
-            guard let items else {
-                print("cloud item is nil")
-                return
-            }
-            DispatchQueue.main.async {
-                self?.dataList = items
-                self?.tableView.reloadData()
-            }
-        }
         
+        setupUI()
+        setupNotifications()
+        loadData()
+    }
+    
+    private func setupUI() {
         view.backgroundColor = .red
         view.addSubview(tableView)
         
@@ -37,6 +32,41 @@ class ViewController: UIViewController {
         tableView.dataSource = self
         tableView.delegate = self
         tableView.register(UITableViewCell.self, forCellReuseIdentifier: "cell")
+    }
+    
+    private func setupNotifications() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(refreshData),
+            name: .init("RefreshData"),
+            object: nil
+        )
+    }
+    
+    private func loadData() {
+        CloudSyncMgr.shared.performAfterInitialization { [weak self] in
+            CloudSyncMgr.shared.fetchRecords(database: .private) { [weak self] items in
+                CloudSyncMgr.shared.fetchRecords(database: .shared) { [weak self] sharedItems in
+                    DispatchQueue.main.async {
+                        self?.dataList.removeAll()
+                        
+                        if let items {
+                            self?.dataList.append(contentsOf: items)
+                        }
+
+                        if let sharedItems {
+                            self?.dataList.append(contentsOf: sharedItems)
+                        }
+
+                        self?.tableView.reloadData()
+                    }
+                }
+            }
+        }
+    }
+    
+    @objc private func refreshData() {
+        loadData()
     }
     
     override func viewDidLayoutSubviews() {
@@ -52,9 +82,31 @@ class ViewController: UIViewController {
     }
 
     @objc func share() {
-        let controller = UICloudSharingController(share: CloudSyncMgr.shared.shareRecord!, container: CloudSyncMgr.shared.container)
-        controller.delegate = self
-        present(controller, animated: true)
+        if let rootRecord = CloudSyncMgr.shared.rootShareRecord, let share = CloudSyncMgr.shared.share {
+            let op = CKModifyRecordsOperation(recordsToSave: [rootRecord, share], recordIDsToDelete: nil)
+            op.savePolicy = .changedKeys
+            op.modifyRecordsCompletionBlock = { records, recordIDs, error in
+                DispatchQueue.main.async {
+                    guard error == nil else {
+                        print("Share Fail: \(String(describing: error))")
+                        return
+                    }
+
+                    // CloudKit 成功儲存 share 後會自動分配 stable share URL
+                    // 使用 UICloudSharingController 來管理參與者和權限，並分發 share URL
+                    let controller = UICloudSharingController(share: share, container: CloudSyncMgr.shared.container)
+                    controller.availablePermissions = [.allowReadWrite, .allowPrivate]
+                    controller.delegate = self
+
+                    self.present(controller, animated: true)
+                    print("Share created successfully with stable URL")
+                }
+            }
+
+            CloudSyncMgr.shared.container.privateCloudDatabase.add(op)
+        } else {
+            print("Share Fail: root record \(CloudSyncMgr.shared.rootShareRecord), share: \(CloudSyncMgr.shared.share)")
+        }
     }
 }
 
@@ -94,15 +146,15 @@ extension ViewController: UITableViewDelegate, UITableViewDataSource {
 
 extension ViewController: AddViewControllerDelegate {
     func didAddItem(item: Item) {
-        dataList.append(item)
+        // 重新載入資料以確保同步最新狀態
+        self.dataList.append(item)
         tableView.reloadData()
     }
     
     func didEditItem(at index: Int, item: Item) {
-        if index < dataList.count {
-            dataList[index] = item
-            tableView.reloadData()
-        }
+        // 重新載入資料以確保同步最新狀態  
+        self.dataList.append(item)
+        tableView.reloadData()
     }
 }
 

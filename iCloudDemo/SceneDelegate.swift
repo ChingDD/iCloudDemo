@@ -6,6 +6,7 @@
 //
 
 import UIKit
+import CloudKit
 
 class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
@@ -50,6 +51,16 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         // to restore the scene back to its current state.
     }
 
+    func windowScene(_ windowScene: UIWindowScene, userDidAcceptCloudKitShareWith cloudKitShareMetadata: CKShare.Metadata) {
+        let container = CKContainer(identifier: cloudKitShareMetadata.containerIdentifier)
+        Task {
+           do {
+               try await container.accept(cloudKitShareMetadata)
+           } catch {
+               print("container accept fail")
+           }
+       }
+    }
 
 }
 
