@@ -17,10 +17,15 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         // Use this method to optionally configure and attach the UIWindow `window` to the provided UIWindowScene `scene`.
         // If using a storyboard, the `window` property will automatically be initialized and attached to the scene.
         // This delegate does not imply the connecting scene or session are new (see `application:configurationForConnectingSceneSession` instead).
-        guard let _ = (scene as? UIWindowScene) else { return }
+        guard let windowScene = (scene as? UIWindowScene) else { return }
+        
+        window = UIWindow(windowScene: windowScene)
         let naviController = UINavigationController()
-        naviController.viewControllers = [ViewController()]
+        let cloudService = CloudSyncMgr()
+        let vm = DatabaseViewModel(service: cloudService)
+        naviController.viewControllers = [ViewController(viewModel: vm)]
         window?.rootViewController = naviController
+        window?.makeKeyAndVisible()
     }
 
     func sceneDidDisconnect(_ scene: UIScene) {
@@ -56,6 +61,7 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         Task {
            do {
                try await container.accept(cloudKitShareMetadata)
+               print("container accept")
            } catch {
                print("container accept fail")
            }

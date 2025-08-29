@@ -6,10 +6,6 @@
 //
 
 import UIKit
-protocol AddViewControllerDelegate: AnyObject {
-    func didAddItem(item: Item)
-    func didEditItem(at index: Int, item: Item)
-}
 
 class AddViewController: UIViewController {
     let textField = UITextField()
@@ -18,10 +14,19 @@ class AddViewController: UIViewController {
 
     var currentItem = Item()
 
-    weak var delegate: AddViewControllerDelegate?
-    
     var editingIndex: Int?
     var isEditingMode: Bool = false
+
+    private let viewModel: DatabaseViewModel
+
+    init(viewModel: DatabaseViewModel) {
+        self.viewModel = viewModel
+        super.init(nibName: nil, bundle: nil)
+    }
+    
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
     
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -72,6 +77,7 @@ class AddViewController: UIViewController {
         editingIndex = index
         isEditingMode = true
         currentItem = item
+        shareButton.isEnabled = (currentItem.database?.databaseScope == .private)
         self.title = "編輯項目"
     }
     
@@ -86,20 +92,12 @@ class AddViewController: UIViewController {
 
         if isEditingMode, let index = editingIndex {
             currentItem.title = text
-            delegate?.didEditItem(at: index, item: currentItem)
-            CloudSyncMgr.shared.updateToCloud(item: currentItem)
+            viewModel.updateData(data: currentItem, index: index)
             navigationController?.popViewController(animated: true)
         } else {
             currentItem.title = text
-            CloudSyncMgr.shared.saveToCloud(item: currentItem) { [weak self] recordID in
-                guard let self else { return }
-                DispatchQueue.main.async { [weak self] in
-                    guard let self else { return }
-                    currentItem.recordID = recordID
-                    delegate?.didAddItem(item: currentItem)
-                    navigationController?.popViewController(animated: true)
-                }
-            }
+            viewModel.addData(data: currentItem)
+            navigationController?.popViewController(animated: true)
         }
     }
     

@@ -10,15 +10,22 @@ import CloudKit
 
 class ViewController: UIViewController {
     let tableView = UITableView()
-    var dataList: [Item] = []
-    let cloudMgr = CloudSyncMgr.shared
+    let viewModel: DatabaseViewModel
 
+    init(viewModel: DatabaseViewModel) {
+        self.viewModel = viewModel
+        super.init(nibName: nil, bundle: nil)
+    }
+    
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+    
     override func viewDidLoad() {
         super.viewDidLoad()
-        
         setupUI()
         setupNotifications()
-        loadData()
+        binding()
     }
     
     private func setupUI() {
@@ -42,31 +49,17 @@ class ViewController: UIViewController {
             object: nil
         )
     }
-    
-    private func loadData() {
-        CloudSyncMgr.shared.performAfterInitialization { [weak self] in
-            CloudSyncMgr.shared.fetchRecords(database: .private) { [weak self] items in
-                CloudSyncMgr.shared.fetchRecords(database: .shared) { [weak self] sharedItems in
-                    DispatchQueue.main.async {
-                        self?.dataList.removeAll()
-                        
-                        if let items {
-                            self?.dataList.append(contentsOf: items)
-                        }
 
-                        if let sharedItems {
-                            self?.dataList.append(contentsOf: sharedItems)
-                        }
-
-                        self?.tableView.reloadData()
-                    }
-                }
+    private func binding() {
+        viewModel.item.bind { items in
+            DispatchQueue.main.async {
+                self.tableView.reloadData()
             }
         }
     }
     
     @objc private func refreshData() {
-        loadData()
+        self.tableView.reloadData()
     }
     
     override func viewDidLayoutSubviews() {
@@ -75,37 +68,22 @@ class ViewController: UIViewController {
     }
     
     @objc func add() {
-        let controller = AddViewController()
-        controller.delegate = self
+        let controller = AddViewController(viewModel: viewModel)
         controller.configForAdd()
         navigationController?.pushViewController(controller, animated: true)
     }
 
     @objc func share() {
-        if let rootRecord = CloudSyncMgr.shared.rootShareRecord, let share = CloudSyncMgr.shared.share {
-            let op = CKModifyRecordsOperation(recordsToSave: [rootRecord, share], recordIDsToDelete: nil)
-            op.savePolicy = .changedKeys
-            op.modifyRecordsCompletionBlock = { records, recordIDs, error in
-                DispatchQueue.main.async {
-                    guard error == nil else {
-                        print("Share Fail: \(String(describing: error))")
-                        return
-                    }
+        if let share = viewModel.database.share {
+                let controller = UICloudSharingController(share: share, container: self.viewModel.database.container)
+                controller.availablePermissions = [.allowReadWrite, .allowPrivate]
+                controller.delegate = self
 
-                    // CloudKit 成功儲存 share 後會自動分配 stable share URL
-                    // 使用 UICloudSharingController 來管理參與者和權限，並分發 share URL
-                    let controller = UICloudSharingController(share: share, container: CloudSyncMgr.shared.container)
-                    controller.availablePermissions = [.allowReadWrite, .allowPrivate]
-                    controller.delegate = self
-
-                    self.present(controller, animated: true)
-                    print("Share created successfully with stable URL")
-                }
-            }
-
-            CloudSyncMgr.shared.container.privateCloudDatabase.add(op)
+                self.present(controller, animated: true)
+                print("Share created successfully with stable URL")
+            
         } else {
-            print("Share Fail: root record \(CloudSyncMgr.shared.rootShareRecord), share: \(CloudSyncMgr.shared.share)")
+            print("Share Fail- share: \(viewModel.database.share)")
         }
     }
 }
@@ -113,9 +91,10 @@ class ViewController: UIViewController {
 
 extension ViewController: UITableViewDelegate, UITableViewDataSource {
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
-        let controller = AddViewController()
-        controller.delegate = self
-        let item = dataList[indexPath.row]
+        let items = viewModel.item.value ?? []
+        let item = items[indexPath.row]
+
+        let controller = AddViewController(viewModel: viewModel)
         controller.configForEdit(item: item, index: indexPath.row)
         navigationController?.pushViewController(controller, animated: true)
         
@@ -125,39 +104,26 @@ extension ViewController: UITableViewDelegate, UITableViewDataSource {
     func tableView(_ tableView: UITableView, trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
         let deleteButton = UIContextualAction(style: .destructive, title: "Delete") { [weak self] (action, view, completionHandler) in
             guard let self else { return }
-            CloudSyncMgr.shared.deleteToCloud(readyToDelete: self.dataList[indexPath.row])
-            self.dataList.remove(at: indexPath.row)
-            tableView.reloadData()
+            let items = viewModel.item.value ?? []
+            let item = items[indexPath.row]
+            viewModel.deleteData(data: item, index: indexPath.row)
         }
         let config = UISwipeActionsConfiguration(actions: [deleteButton])
         return config
     }
     
     func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        dataList.count
+        let items = viewModel.item.value ?? []
+        return items.count
     }
     
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         let cell = tableView.dequeueReusableCell(withIdentifier: "cell", for: indexPath)
-        cell.textLabel?.text = dataList[indexPath.row].title
+        let items = viewModel.item.value ?? []
+        cell.textLabel?.text = items[indexPath.row].title
         return cell
     }
 }
-
-extension ViewController: AddViewControllerDelegate {
-    func didAddItem(item: Item) {
-        // 重新載入資料以確保同步最新狀態
-        self.dataList.append(item)
-        tableView.reloadData()
-    }
-    
-    func didEditItem(at index: Int, item: Item) {
-        // 重新載入資料以確保同步最新狀態  
-        self.dataList.append(item)
-        tableView.reloadData()
-    }
-}
-
 
 extension ViewController: UICloudSharingControllerDelegate {
     func cloudSharingController(_ csc: UICloudSharingController, failedToSaveShareWithError error: any Error) {
