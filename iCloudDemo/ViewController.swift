@@ -10,9 +10,16 @@ import CloudKit
 
 class ViewController: UIViewController {
     let tableView = UITableView()
-    var dataList: [Item] = []
-    let cloudMgr = CloudSyncMgr.shared
+    let viewModel: DatabaseViewModel
 
+    init(viewModel: DatabaseViewModel) {
+        self.viewModel = viewModel
+    }
+    
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+    
     override func viewDidLoad() {
         super.viewDidLoad()
         
@@ -42,25 +49,11 @@ class ViewController: UIViewController {
             object: nil
         )
     }
-    
-    private func loadData() {
-        CloudSyncMgr.shared.performAfterInitialization { [weak self] in
-            CloudSyncMgr.shared.fetchRecords(database: .private) { [weak self] items in
-                CloudSyncMgr.shared.fetchRecords(database: .shared) { [weak self] sharedItems in
-                    DispatchQueue.main.async {
-                        self?.dataList.removeAll()
-                        
-                        if let items {
-                            self?.dataList.append(contentsOf: items)
-                        }
 
-                        if let sharedItems {
-                            self?.dataList.append(contentsOf: sharedItems)
-                        }
-
-                        self?.tableView.reloadData()
-                    }
-                }
+    private func binding() {
+        viewModel.item.bind { items in
+            DispatchQueue.main.async {
+                self.tableView.reloadData()
             }
         }
     }
@@ -125,7 +118,7 @@ extension ViewController: UITableViewDelegate, UITableViewDataSource {
     func tableView(_ tableView: UITableView, trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
         let deleteButton = UIContextualAction(style: .destructive, title: "Delete") { [weak self] (action, view, completionHandler) in
             guard let self else { return }
-            CloudSyncMgr.shared.deleteToCloud(readyToDelete: self.dataList[indexPath.row])
+            viewModel.deleteData(data: <#T##Item#>, database: <#T##LocalCacheDB#>)
             self.dataList.remove(at: indexPath.row)
             tableView.reloadData()
         }
