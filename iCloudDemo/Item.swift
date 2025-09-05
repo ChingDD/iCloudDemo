@@ -13,9 +13,9 @@ struct Item {
     var isShare: Bool
     let timestamp: Double
     var recordID: CKRecord.ID?
-    let database: CKDatabase
+    var database: CKDatabase?
 
-    init(title: String = "", isShare: Bool = false, timestamp: Double = Date().timeIntervalSince1970, recordID: CKRecord.ID? = nil, database: CKDatabase) {
+    init(title: String = "", isShare: Bool = false, timestamp: Double = Date().timeIntervalSince1970, recordID: CKRecord.ID? = nil, database: CKDatabase? = nil) {
         self.title = title
         self.isShare = isShare
         self.timestamp = timestamp

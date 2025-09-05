@@ -8,15 +8,15 @@
 import Foundation
 import CloudKit
 protocol CloudServiceProtocol{
-    func addData(data: Item, database: LocalCacheDB, completion: @escaping (CKRecord.ID?) -> Void)
-    func updateData(data: Item, database: LocalCacheDB)
-    func deleteData(data: Item, database: LocalCacheDB)
+    func addData(data: Item, database: LocalCacheDB, completion: @escaping ([CKDatabase : CKRecord?]) -> Void)
+    func updateData(data: Item, database: LocalCacheDB, completion: @escaping (CKRecord.ID?) -> Void)
+    func deleteData(data: Item, database: LocalCacheDB, completion: @escaping (CKRecord.ID?) -> Void)
     func fetchDatabase(database: LocalCacheDB, completion: @escaping (LocalCacheDB) -> Void)
-    func fetchRecords(database: LocalCacheDB, completion: @escaping ([CKRecord]) -> Void)
+    func fetchRecords(database: LocalCacheDB, completion: @escaping ([CKDatabase : [CKRecord]]) -> Void)
 }
 
 class CloudSyncMgr: CloudServiceProtocol {
-    func addData(data: Item, database: LocalCacheDB, completion: @escaping (CKRecord.ID?) -> Void) {
+    func addData(data: Item, database: LocalCacheDB, completion: @escaping ([CKDatabase : CKRecord?]) -> Void) {
         guard let share = database.share else {
             print("Add Data Error: Database Not Ready")
             return
@@ -34,6 +34,8 @@ class CloudSyncMgr: CloudServiceProtocol {
         let recordID = CKRecord.ID(zoneID: zone.zoneID)
         let record = CKRecord(recordType: "Item", recordID: recordID)
 
+        var recordDic: [CKDatabase : CKRecord?] = [:]
+
         record.setValuesForKeys([
             "name": name,
             "isShare": isShare,   // Stored as Int(64)
@@ -47,27 +49,31 @@ class CloudSyncMgr: CloudServiceProtocol {
                 switch result {
                 case .success(let success):
                     print("Add Record Success")
-                    completion(record.recordID)
+                    recordDic[privateDB] = record
 
                 case .failure(let error):
                     print("Add Record Error: \(error)")
-                    completion(nil)
+                    recordDic[privateDB] = nil
                 }
+                completion(recordDic)
+
             }
         } else {
             privateDB.save(record) { savedRecord, error in
                 if error != nil {
                     print("Add Record Error: \(error)")
-                    completion(nil)
+                    recordDic[privateDB] = nil
+                    completion(recordDic)
                     return
                 }
                 print("Add Record Success")
-                completion(record.recordID)
+                recordDic[privateDB] = record
+                completion(recordDic)
             }
         }
     }
     
-    func updateData(data: Item, database: LocalCacheDB) {
+    func updateData(data: Item, database: LocalCacheDB, completion: @escaping (CKRecord.ID?) -> Void) {
         guard let share = database.share,
               let recordID = data.recordID else {
             print("Add Data Error: Database Not Ready")
@@ -99,9 +105,11 @@ class CloudSyncMgr: CloudServiceProtocol {
                                               deleting: []) { result in
                     switch result {
                     case .success(let success):
+                        completion(recordID)
                         print("Update Record Success")
 
                     case .failure(let error):
+                        completion(recordID)
                         print("Update Record Error: \(error)")
                     }
                 }
@@ -109,7 +117,7 @@ class CloudSyncMgr: CloudServiceProtocol {
         }
     }
     
-    func deleteData(data: Item, database: LocalCacheDB) {
+    func deleteData(data: Item, database: LocalCacheDB, completion: @escaping (CKRecord.ID?) -> Void) {
         guard let share = database.share,
               let recordID = data.recordID else {
             print("Add Data Error: Database Not Ready")
@@ -122,9 +130,10 @@ class CloudSyncMgr: CloudServiceProtocol {
 
         let operation = CKModifyRecordsOperation()
         operation.recordIDsToDelete = [recordID]
-        privateDB.add(operation)
+        data.database?.add(operation)
         operation.completionBlock = {
             DispatchQueue.main.async {
+                completion(recordID)
                 print("Delete to Cloud Finished: \(operation.isFinished)")
             }
         }
@@ -186,18 +195,18 @@ class CloudSyncMgr: CloudServiceProtocol {
 //        setupDatabaseNotifications()
     }
 
-    func fetchRecords(database: LocalCacheDB, completion: @escaping ([CKRecord]) -> Void) {
+    func fetchRecords(database: LocalCacheDB, completion: @escaping ([CKDatabase : [CKRecord]]) -> Void) {
         let privateDB = database.privateDatabase
         let shareDB = database.sharedDatabase
         let privateZone = database.customZone
         let sharedZone = database.sharedZone
-        var totalRecords: [CKRecord] = []
+        var totalRecordDic: [CKDatabase:[CKRecord]] = [:]
         let dispatchGroup = DispatchGroup()
 
         let item = DispatchWorkItem {
             dispatchGroup.enter()
             self.fetchRecords(database: privateDB, zones: [privateZone]) { records in
-                totalRecords.append(contentsOf: records)
+                totalRecordDic[privateDB] = records
                 print("Fetch private records Success")
                 dispatchGroup.leave()
             }
@@ -206,14 +215,14 @@ class CloudSyncMgr: CloudServiceProtocol {
         let item2 = DispatchWorkItem {
             dispatchGroup.enter()
             self.fetchRecords(database: shareDB, zones: sharedZone) { records in
-                totalRecords.append(contentsOf: records)
+                totalRecordDic[shareDB] = records
                 print("Fetch share records Success")
                 dispatchGroup.leave()
             }
         }
 
         dispatchGroup.notify(queue: .main) {
-            completion(totalRecords)
+            completion(totalRecordDic)
         }
     }
 

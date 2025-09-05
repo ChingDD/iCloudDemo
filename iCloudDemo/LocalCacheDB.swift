@@ -28,4 +28,8 @@ class LocalCacheDB {
     }
 
     var share: CKShare?
+
+    func startOperation(op: CKOperation) {
+        container.add(op)
+    }
 }

@@ -25,35 +25,66 @@ class DatabaseViewModel {
 
     func fetchData() {
         cloudService.fetchDatabase(database: database) { localCacheDB in
-            self.cloudService.fetchRecords(database: localCacheDB) { records in
+            self.cloudService.fetchRecords(database: localCacheDB) { recordDic in
+                var tmpItems: [Item] = []
+
                 // Convert CKRecord to Item
-                let tmpItems = records.sorted {
-                    $0.creationDate! < $1.creationDate!
-                }.compactMap {
-                    if let name = $0["name"] as? String,
-                       let isShareInt = $0["isShare"] as? Int,
-                       let timestamp = $0["timestamp"] as? Double {
-                        print("fetchRecords - Found record '\(name)' with timestamp: \(timestamp) in zone: \($0.recordID.zoneID.zoneName)")
-                        return Item(title: name, isShare: isShareInt == 1 ? true : false, timestamp: timestamp, recordID: $0.recordID, database: )
-                    } else {
-                        return nil
+                for (database , records) in recordDic {
+                    tmpItems = records
+                    .sorted {
+                        $0.creationDate! < $1.creationDate!
+                    }.compactMap {
+                        if let name = $0["name"] as? String,
+                           let isShareInt = $0["isShare"] as? Int,
+                           let timestamp = $0["timestamp"] as? Double {
+                            print("fetchRecords - Found record '\(name)' with timestamp: \(timestamp) in zone: \($0.recordID.zoneID.zoneName)")
+                            return Item(title: name, isShare: isShareInt == 1 ? true : false, timestamp: timestamp, recordID: $0.recordID, database: database)
+                        } else {
+                            return nil
+                        }
                     }
                 }
+
                 self.item.value = tmpItems
             }
         }
     }
 
-    func addData(data: Item, database: LocalCacheDB) {
+    func addData(data: Item) {
+        cloudService.addData(data: data, database: database) { [weak self] recordDic in
+            guard let self else { return }
+            var data = data
+            for (database , record) in recordDic {
+                data.recordID = record?.recordID
+                data.database = database
 
+                var items = item.value
+                items?.append(data)
+                item.value = items
+            }
+        }
     }
 
-    func updateData(data: Item, database: LocalCacheDB) {
-
+    func updateData(data: Item, index: Int) {
+        cloudService.updateData(data: data, database: database) { [weak self] recordID in
+            guard let self else { return }
+            var items = item.value
+            items?[index] = data
+            item.value = items
+        }
     }
 
-    func deleteData(data: Item, database: LocalCacheDB) {
+    func deleteData(data: Item, index: Int) {
+        cloudService.deleteData(data: data, database: database) { [weak self] recordID in
+            guard let self else { return }
+            var items = item.value
+            items?.remove(at: index)
+            item.value = items
+        }
+    }
 
+    func startOperation(op: CKOperation) {
+        database.startOperation(op: op)
     }
 
 }
