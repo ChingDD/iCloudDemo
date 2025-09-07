@@ -20,6 +20,7 @@ class DatabaseViewModel {
 
     init(service: CloudServiceProtocol) {
         cloudService = service
+        
         fetchData()
     }
 
@@ -27,13 +28,10 @@ class DatabaseViewModel {
         cloudService.fetchDatabase(database: database) { localCacheDB in
             self.cloudService.fetchRecords(database: localCacheDB) { recordDic in
                 var tmpItems: [Item] = []
-
+                
                 // Convert CKRecord to Item
                 for (database , records) in recordDic {
-                    tmpItems = records
-                    .sorted {
-                        $0.creationDate! < $1.creationDate!
-                    }.compactMap {
+                    let items = records.compactMap {
                         if let name = $0["name"] as? String,
                            let isShareInt = $0["isShare"] as? Int,
                            let timestamp = $0["timestamp"] as? Double {
@@ -43,8 +41,10 @@ class DatabaseViewModel {
                             return nil
                         }
                     }
+                    tmpItems.append(contentsOf: items)
                 }
-
+                
+                tmpItems.sort { $0.timestamp < $1.timestamp }
                 self.item.value = tmpItems
             }
         }

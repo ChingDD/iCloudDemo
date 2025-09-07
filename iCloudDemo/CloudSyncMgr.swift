@@ -44,7 +44,7 @@ class CloudSyncMgr: CloudServiceProtocol {
 
         if isShare {
             record.setParent(rootRecord)
-            privateDB.modifyRecords(saving: [share, rootRecord],
+            privateDB.modifyRecords(saving: [share, rootRecord, record],
                                           deleting: []) { result in
                 switch result {
                 case .success(let success):
@@ -80,11 +80,10 @@ class CloudSyncMgr: CloudServiceProtocol {
             return
         }
         // database
-        let privateDB = database.privateDatabase
-        let zone = database.customZone
+        let db = data.database ?? database.privateDatabase
         let rootRecord = database.rootShareRecord
 
-        privateDB.fetch(withRecordID: recordID) { record, error in
+        db.fetch(withRecordID: recordID) { record, error in
             if error != nil {
                 print("updateToCloud - Fetch error: \(error)")
                 return
@@ -101,7 +100,7 @@ class CloudSyncMgr: CloudServiceProtocol {
                     record.parent = nil
                 }
 
-                privateDB.modifyRecords(saving: [share, rootRecord],
+                db.modifyRecords(saving: [share, rootRecord],
                                               deleting: []) { result in
                     switch result {
                     case .success(let success):
@@ -118,15 +117,10 @@ class CloudSyncMgr: CloudServiceProtocol {
     }
     
     func deleteData(data: Item, database: LocalCacheDB, completion: @escaping (CKRecord.ID?) -> Void) {
-        guard let share = database.share,
-              let recordID = data.recordID else {
+        guard let recordID = data.recordID else {
             print("Add Data Error: Database Not Ready")
             return
         }
-        // database
-        let privateDB = database.privateDatabase
-        let zone = database.customZone
-        let rootRecord = database.rootShareRecord
 
         let operation = CKModifyRecordsOperation()
         operation.recordIDsToDelete = [recordID]
@@ -143,44 +137,73 @@ class CloudSyncMgr: CloudServiceProtocol {
         let privateDB = database.privateDatabase
         let shareDB = database.sharedDatabase
         let shareID = database.rootShareRecord.share?.recordID
+        print("Share ID: \(shareID)")
 
         var sharedZone: [CKRecordZone]?
         var share: CKShare?
+        
+        let group = DispatchGroup()
+        
+        // Fetch Shared Zone
+        group.enter()
+        shareDB.fetchAllRecordZones { zones, error in
+            defer { group.leave() }
 
-        let queue = OperationQueue()
-        queue.maxConcurrentOperationCount = 2
+            if error != nil {
+                print("Fetch shared zone error: \(error)")
+                return
+            }
+            sharedZone = zones
+        }
 
-        let fetchSharedZoneOP = BlockOperation {
-            // Fetch Shared Zone
-            shareDB.fetchAllRecordZones { zones, error in
+        // Fetch Share
+        if let shareID = shareID {
+            group.enter()
+            privateDB.fetch(withRecordID: shareID) { record, error in
+                defer { group.leave() }
+                
                 if error != nil {
-                    print("Fetch shared zone error: \(error)")
+                    print("Fetch Share Error: \(error)")
                     return
                 }
-                sharedZone = zones
+                guard let shareData = record as? CKShare else {
+                    print("Transform Record Error")
+                    return
+                }
+                share = shareData
             }
-        }
-
-        let fetchShareOP = BlockOperation {
-            // Fetch Share
-            if let shareID = shareID {
-                privateDB.fetch(withRecordID: shareID) { record, error in
-                    if error != nil {
-                        print("Fetch Share Error: \(error)")
-                        return
+        } else {
+            group.enter()
+            // 先確保 custom zone 存在，然後再創建 share
+            database.privateDatabase.fetch(withRecordZoneID: database.customZone.zoneID) { zone, error in
+                if let error = error as? CKError, error.code == .zoneNotFound {
+                    // Zone不存在，先建立zone
+                    database.privateDatabase.save(database.customZone) { savedZone, saveError in
+                        if let saveError = saveError {
+                            print("Failed to create custom zone: \(saveError)")
+                            group.leave()
+                            return
+                        }
+                        print("Custom zone created successfully, now creating share...")
+                        self.createShareAndRootRecord(database: database, completion: { shareData in
+                            share = shareData
+                            group.leave()
+                        })
                     }
-                    guard let shareData = record as? CKShare else {
-                        print("Transform Record Error")
-                        return
-                    }
-                    share = shareData
+                } else if zone != nil {
+                    print("Custom zone exists, creating share...")
+                    self.createShareAndRootRecord(database: database, completion: { shareData in
+                        share = shareData
+                        group.leave()
+                    })
+                } else {
+                    print("Error checking custom zone: \(error)")
+                    group.leave()
                 }
             }
         }
 
-        queue.addOperation(fetchSharedZoneOP)
-        queue.addOperation(fetchShareOP)
-        queue.addBarrierBlock {
+        group.notify(queue: .global()) {
             print("All tasks done!")
             let localCacheDB = database
             localCacheDB.sharedZone = sharedZone
@@ -194,6 +217,31 @@ class CloudSyncMgr: CloudServiceProtocol {
     init() {
 //        setupDatabaseNotifications()
     }
+    
+    private func createShareAndRootRecord(database: LocalCacheDB, completion: @escaping (CKShare?) -> Void) {
+        let rootRecord = database.rootShareRecord
+        let shareData = CKShare(rootRecord: rootRecord)
+        let op = CKModifyRecordsOperation(recordsToSave: [shareData, rootRecord])
+        op.savePolicy = .ifServerRecordUnchanged
+        op.modifyRecordsCompletionBlock = { records, recordIDs, error in
+            if let error = error {
+                print("Create Share Error: \(error)")
+                
+                // 檢查 partial errors
+                if let ckError = error as? CKError,
+                   let partialErrors = ckError.partialErrorsByItemID {
+                    for (recordID, error) in partialErrors {
+                        print("Record \(recordID) failed with error: \(error)")
+                    }
+                }
+                completion(nil)
+            } else {
+                print("Create Share Success：\(shareData)")
+                completion(shareData)
+            }
+        }
+        database.privateDatabase.add(op)
+    }
 
     func fetchRecords(database: LocalCacheDB, completion: @escaping ([CKDatabase : [CKRecord]]) -> Void) {
         let privateDB = database.privateDatabase
@@ -202,70 +250,70 @@ class CloudSyncMgr: CloudServiceProtocol {
         let sharedZone = database.sharedZone
         var totalRecordDic: [CKDatabase:[CKRecord]] = [:]
         let dispatchGroup = DispatchGroup()
-
+        
         let item = DispatchWorkItem {
-            dispatchGroup.enter()
-            self.fetchRecords(database: privateDB, zones: [privateZone]) { records in
+            self.fetchRecords(dbType: .private, database: database, zones: [privateZone]) { records in
                 totalRecordDic[privateDB] = records
                 print("Fetch private records Success")
                 dispatchGroup.leave()
             }
         }
-
+        
         let item2 = DispatchWorkItem {
-            dispatchGroup.enter()
-            self.fetchRecords(database: shareDB, zones: sharedZone) { records in
+            print("Fetch Shared Record")
+            self.fetchRecords(dbType: .shared, database: database, zones: sharedZone) { records in
                 totalRecordDic[shareDB] = records
                 print("Fetch share records Success")
                 dispatchGroup.leave()
             }
         }
+        
+        dispatchGroup.enter()
+        DispatchQueue.global().async(execute: item)
+        dispatchGroup.enter()
+        DispatchQueue.global().async(execute: item2)
 
         dispatchGroup.notify(queue: .main) {
             completion(totalRecordDic)
         }
     }
 
-    private func fetchRecords(database: CKDatabase, zones: [CKRecordZone]?, completion: @escaping([CKRecord]) -> Void) {
-        guard let zones else {
-            print("Zone is nil")
-            return
-        }
+    private func fetchRecords(dbType: CKDatabase.Scope, database: LocalCacheDB, zones: [CKRecordZone]?, completion: @escaping([CKRecord]) -> Void) {
+        print("Start to fetch share records")
+        let currentDB = dbType == .private ? database.privateDatabase : database.sharedDatabase
 
         let query = CKQuery(recordType: "Item",
                             predicate: NSPredicate(value: true))
 
         var recordList = [CKRecord]()
 
-        let queue = OperationQueue()
-        queue.maxConcurrentOperationCount = 3
+        let group = DispatchGroup()
+        
+        for zone in zones ?? [] {
+            group.enter()
+            currentDB.fetch(withQuery: query, inZoneWith: zone.zoneID) { result in
+                defer { group.leave() }
+                
+                switch result {
+                case .success(let records):
+                    let results = records.matchResults
+                    for record in results {
+                        switch record.1 {
+                        case .success(let record):
+                            recordList.append(record)
 
-        for zone in zones {
-            let op = BlockOperation {
-                database.fetch(withQuery: query, inZoneWith: zone.zoneID) { result in
-                    switch result {
-                    case .success(let records):
-                        let results = records.matchResults
-                        for record in results {
-                            switch record.1 {
-                            case .success(let record):
-                                recordList.append(record)
-
-                            case .failure(let error):
-                                print("get single item error: \(error)")
-                            }
+                        case .failure(let error):
+                            print("get single item error: \(error)")
                         }
-
-                    case .failure(let error):
-                        print("fetch error: \(error)")
                     }
+
+                case .failure(let error):
+                    print("fetch error: \(error)")
                 }
             }
-            queue.addOperation(op)
         }
-
-        queue.addBarrierBlock {
-            print("Fetch Records Complete")
+        
+        group.notify(queue: .global()) {
             completion(recordList)
         }
     }

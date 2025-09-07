@@ -21,7 +21,7 @@ class AddViewController: UIViewController {
 
     init(viewModel: DatabaseViewModel) {
         self.viewModel = viewModel
-        super.init()
+        super.init(nibName: nil, bundle: nil)
     }
     
     required init?(coder: NSCoder) {
@@ -77,6 +77,7 @@ class AddViewController: UIViewController {
         editingIndex = index
         isEditingMode = true
         currentItem = item
+        shareButton.isEnabled = (currentItem.database?.databaseScope == .private)
         self.title = "編輯項目"
     }
     

@@ -14,7 +14,7 @@ class ViewController: UIViewController {
 
     init(viewModel: DatabaseViewModel) {
         self.viewModel = viewModel
-        super.init()
+        super.init(nibName: nil, bundle: nil)
     }
     
     required init?(coder: NSCoder) {
@@ -25,6 +25,7 @@ class ViewController: UIViewController {
         super.viewDidLoad()
         setupUI()
         setupNotifications()
+        binding()
     }
     
     private func setupUI() {

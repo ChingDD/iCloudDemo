@@ -8,6 +8,11 @@
 import Foundation
 import CloudKit
 
+enum DatabaseType {
+    case privateDB
+    case sharedDB
+}
+
 class LocalCacheDB {
     // Container
     private(set) var defaultContainer = CKContainer.default()
