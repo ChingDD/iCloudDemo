@@ -356,12 +356,15 @@ class CloudSyncMgr: CloudServiceProtocol {
         let privateZone = database.customZone
         let sharedZone = database.sharedZone
         var totalRecordDic: [CKDatabase:[CKRecord]] = [:]
+        var privateDBRecords: [CKRecord] = []
+        var sharedDBRecords: [CKRecord] = []
+        
         let dispatchGroup = DispatchGroup()
         
         let item = DispatchWorkItem {
             self.fetchRecords(dbType: .private, database: database, zones: [privateZone]) { records in
-                totalRecordDic[privateDB] = records
-                print("Fetch private records Success")
+                privateDBRecords = records
+                print("Fetch private records Success, record counts: \(records.count)")
                 dispatchGroup.leave()
             }
         }
@@ -369,8 +372,8 @@ class CloudSyncMgr: CloudServiceProtocol {
         let item2 = DispatchWorkItem {
             print("Fetch Shared Record")
             self.fetchRecords(dbType: .shared, database: database, zones: sharedZone) { records in
-                totalRecordDic[shareDB] = records
-                print("Fetch share records Success")
+                sharedDBRecords = records
+                print("Fetch share records Success, record counts: \(records.count)")
                 dispatchGroup.leave()
             }
         }
@@ -381,6 +384,8 @@ class CloudSyncMgr: CloudServiceProtocol {
         DispatchQueue.global().async(execute: item2)
 
         dispatchGroup.notify(queue: .main) {
+            totalRecordDic[privateDB] = privateDBRecords
+            totalRecordDic[shareDB] = sharedDBRecords
             completion(totalRecordDic)
         }
     }
