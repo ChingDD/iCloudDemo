@@ -76,45 +76,86 @@ class CloudSyncMgr: CloudServiceProtocol {
     func updateData(data: Item, database: LocalCacheDB, completion: @escaping (CKRecord.ID?) -> Void) {
         guard let share = database.share,
               let recordID = data.recordID else {
-            print("Add Data Error: Database Not Ready")
+            print("Update Data Error: Database Not Ready")
+            completion(nil)
             return
         }
         // database
         let db = data.database ?? database.privateDatabase
         let rootRecord = database.rootShareRecord
 
-        db.fetch(withRecordID: recordID) { record, error in
-            if error != nil {
+        db.fetch(withRecordID: recordID) { [weak self] record, error in
+            guard let self = self else {
+                 completion(nil)
+                 return
+            }
+ 
+            if let error = error {
                 print("updateToCloud - Fetch error: \(error)")
+                completion(nil)
                 return
             }
-
-            if let record = record, let rootRecord {
-                print("updateToCloud - Found record with recordID")
-                record["name"] = data.title
-                record["isShare"] = data.isShare
-
-                if data.isShare {
-                    record.setParent(rootRecord)
-                } else {
-                    record.parent = nil
-                }
-
-                db.modifyRecords(saving: [share, rootRecord],
-                                              deleting: []) { result in
-                    switch result {
-                    case .success(let success):
-                        completion(recordID)
-                        print("Update Record Success")
-
-                    case .failure(let error):
-                        completion(recordID)
-                        print("Update Record Error: \(error)")
-                    }
-                }
-            } else {
-                print("Update Data Fail - record: \(record), root Record: \(rootRecord)")
+ 
+            guard let record = record else {
+                print("Update Data Fail - record not found")
+                completion(nil)
+                return
             }
+            
+            // Update Item
+            updateRecordField(record: record, with: data, database: database)
+            
+            // 根據資料庫類型選擇更新方式
+            if data.database?.databaseScope == .private {
+                updatePrivateDBRecord(record: record, with: data, database: database, completion: completion)
+            } else {
+                updateShareDBRecord(record: record, with: data, completion: completion)
+            }
+        }
+    }
+    
+    private func updateRecordField(record: CKRecord, with data: Item, database: LocalCacheDB) {
+        record["name"] = data.title
+        record["isShare"] = data.isShare
+        
+        let db = data.database ?? database.privateDatabase
+        
+        if db.databaseScope == .private {
+            if data.isShare, let rootRecord = database.rootShareRecord {
+                record.setParent(rootRecord)
+            } else {
+                record.parent = nil
+            }
+        }
+    }
+    
+    private func updatePrivateDBRecord(record: CKRecord, with data: Item, database: LocalCacheDB, completion: @escaping (CKRecord.ID?) -> Void) {
+        guard let db = data.database, db.databaseScope == .private else { return }
+        guard let rootRecord = database.rootShareRecord else { return }
+        guard let share = database.share else { return }
+        
+        db.modifyRecords(saving: [record, share, rootRecord], deleting: []) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success(_):
+                print("Update Private Record Success")
+                completion(record.recordID)
+            case .failure(let error):
+                print("Update Private Record Error: \(error)")
+                completion(nil)
+            }
+        }
+    }
+    
+    private func updateShareDBRecord(record: CKRecord, with data: Item, completion: @escaping (CKRecord.ID?) -> Void) {
+        guard let db = data.database, db.databaseScope == .shared else { return }
+        db.save(record) { savedRecord, error in
+            if let error {
+                print("Update Share Record Error: \(error)")
+                completion(nil)
+                return
+            }
+            completion(savedRecord?.recordID)
         }
     }
     
